@@ -126,9 +126,8 @@ fn main() -> Result<(), i32> {
 
 	let opts = CLIOptions::parse_args_default_or_exit();
 	if opts.args.len() != 1 {
-		/* XXX:TODO: Write to stderr */
-		println!("Invalid number of arguments -- must supply a search string");
-		println!("{}", CLIOptions::usage());
+		eprintln!("Invalid number of arguments -- must supply a search string");
+		eprintln!("{}", CLIOptions::usage());
 		return Err(1);
 	}
 
@@ -178,12 +177,16 @@ fn main() -> Result<(), i32> {
 						/* Skip "search_start_offset" bytes of the "public_key_string" for the search */
 						let public_key_string_truncated = &public_key_string[search_start_offset..];
 
-						let mut acceptable = false;
-						if public_key_string_truncated.starts_with(&thread_search_start) {
-							acceptable = true;
-						} else if public_key_string_truncated.ends_with(&thread_search_end) {
-							acceptable = true;
-						}
+						/* Determine if the public key is acceptable */
+						let acceptable = {
+							if public_key_string_truncated.starts_with(&thread_search_start) {
+								true
+							} else if public_key_string_truncated.ends_with(&thread_search_end) {
+								true
+							} else {
+								false
+							}
+						};
 
 						if acceptable {
 							if FOUND.load(std::sync::atomic::Ordering::Relaxed) {
