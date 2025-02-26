@@ -1,0 +1,215 @@
+use rand_core::RngCore as _;
+use sha3::Digest as _;
+use gumdrop::Options as _;
+
+fn bytes_to_hex(bytes: &[u8]) -> String {
+	let hex_str = bytes.iter().map(|b| format!("{:02x}", b)).collect::<String>();
+	return hex_str;
+}
+
+fn seed_from_passphrase(passphrase: &str) -> Result<[u8; 32], String> {
+	let min_passphrase_length = 60;
+	let clean_passphrase = passphrase.to_lowercase().replace(" ", "");
+	let clean_passphrase_buffer = clean_passphrase.as_bytes();
+	if clean_passphrase_buffer.len() < min_passphrase_length {
+		return Err(format!("Invalid passphrase, must be at least {} bytes after internal processing, got {}", min_passphrase_length, clean_passphrase_buffer.len()));
+	}
+
+	let mut key = [0u8; 32];
+	pbkdf2::pbkdf2_hmac::<sha2::Sha256>(clean_passphrase_buffer, clean_passphrase_buffer, 64000, &mut key);
+
+	return Ok(key);
+}
+
+fn combine_seed_and_index(seed: &[u8], index: u32) -> [u8; 36] {
+	let mut indexed_seed = [0u8; 36];
+	indexed_seed[..32].copy_from_slice(seed);
+	indexed_seed[32] = (index >> 24) as u8;
+	indexed_seed[33] = (index >> 16) as u8;
+	indexed_seed[34] = (index >> 8) as u8;
+	indexed_seed[35] = index as u8;
+
+	return indexed_seed;
+}
+
+fn seed_to_private_key(seed: &[u8], index: u32) -> Result<secp256k1::SecretKey, secp256k1::Error> {
+	let seed_buffer = combine_seed_and_index(seed, index);
+
+	let hkdf_object = hkdf::Hkdf::<sha3::Sha3_256>::from_prk(&seed_buffer);
+	let mut key = [0u8; 32];
+
+	if hkdf_object.is_err() {
+		return Err(secp256k1::Error::InvalidSecretKey);
+	}
+
+	let can_key = hkdf_object.unwrap().expand(&[0u8; 0], &mut key);
+	if can_key.is_err() {
+		return Err(secp256k1::Error::InvalidSecretKey);
+	}
+
+	return secp256k1::SecretKey::from_byte_array(&key);
+}
+
+fn derive_public_key_string(key: &secp256k1::SecretKey) -> Result<String, String> {
+	let secp = secp256k1::Secp256k1::signing_only();
+        let public_key = key.public_key(&secp);
+	let serialized = public_key.serialize();
+	let mut pub_key_values = vec![0u8; 1];
+	pub_key_values.extend_from_slice(&serialized);
+
+	let checksum_of = Vec::from(&pub_key_values[..]);
+	let mut hasher = sha3::Sha3_256::new();
+	hasher.update(&checksum_of);
+	let checksum = hasher.finalize();
+
+	/* Copy the first 5 bytes of the checksum to the public key */
+	pub_key_values.extend_from_slice(&checksum[..5]);
+
+	if pub_key_values.len() != 38 && pub_key_values.len() != 39 {
+		return Err(format!("internal error: Got incorrect length for public key: {} !== 38 or 39", pub_key_values.len()));
+	}
+
+	let pub_key_formatted = base32::encode(base32::Alphabet::Rfc4648Lower { padding: false }, &pub_key_values);
+
+	return Ok(format!("keeta_{}", pub_key_formatted));
+}
+
+fn generate_random_passphrase() -> String {
+	let mut passphrase_buffer: String = "".to_owned();
+	let words = bip39_dict::ENGLISH.words;
+	let word_count = words.len() as u32;
+
+	for i in 0..24 {
+		let word_index = rand_core::OsRng.next_u32() % word_count;
+		let word = words[word_index as usize];
+		if i > 0 {
+			passphrase_buffer.push_str(" ");
+		}
+		passphrase_buffer.push_str(word);
+	}
+
+	return passphrase_buffer;
+}
+
+fn generate_random_seed() -> [u8; 32] {
+	let mut seed_buffer = [0u8; 32];
+
+	rand_core::OsRng.fill_bytes(&mut seed_buffer);
+
+	return seed_buffer;
+}
+
+#[derive(Debug, gumdrop::Options)]
+struct CLIOptions {
+	#[options(free, help = "text to search for")]
+	args: Vec<String>,
+
+	#[options(help = "print help message")]
+	help: bool,
+
+	#[options(help = "set number of threads", meta = "N")]
+	thread_count: Option<usize>,
+
+	#[options(help = "set maximum index", meta = "N")]
+	max_index: Option<u32>,
+
+	#[options(help = "search for passphrase (slow)")]
+	use_passphrase: bool,
+}
+
+fn main() -> Result<(), i32> {
+	static FOUND: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+	let mut thread_count: usize = 1;
+	let mut max_index: u32 = u32::MAX - 1;
+	let mut passphrase_search = false;
+
+	let opts = CLIOptions::parse_args_default_or_exit();
+	if opts.args.len() != 1 {
+		/* XXX:TODO: Write to stderr */
+		println!("Invalid number of arguments -- must supply a search string");
+		println!("{}", CLIOptions::usage());
+		return Err(1);
+	}
+
+	if opts.max_index.is_some() {
+		max_index = opts.max_index.unwrap();
+	}
+
+	if opts.thread_count.is_some() {
+		thread_count = opts.thread_count.unwrap();
+	}
+
+	if opts.use_passphrase {
+		passphrase_search = true;
+	}
+
+	let search_basic = opts.args[0].clone();
+	let search_start_offset: usize = 9;
+
+	println!("Searching for public key starting or ending with {} with {} threads", search_basic, thread_count);
+
+	std::thread::scope(|s| {
+		for _ in 0..thread_count {
+			let thread_search_start = search_basic.clone();
+			let thread_search_end = search_basic.clone();
+			s.spawn(move || {
+				loop {
+					let passphrase = if passphrase_search {
+						Some(generate_random_passphrase())
+					} else {
+						None
+					};
+
+					let seed = if passphrase.is_some() {
+						seed_from_passphrase(passphrase.clone().unwrap().as_str()).unwrap()
+					} else {
+						generate_random_seed()
+					};
+
+					for index in 0..max_index + 1 {
+						if FOUND.load(std::sync::atomic::Ordering::Relaxed) {
+							break;
+						}
+
+						let key = seed_to_private_key(&seed, index).unwrap();
+						let public_key_string = derive_public_key_string(&key).unwrap();
+
+						/* Skip "search_start_offset" bytes of the "public_key_string" for the search */
+						let public_key_string_truncated = &public_key_string[search_start_offset..];
+
+						let mut acceptable = false;
+						if public_key_string_truncated.starts_with(&thread_search_start) {
+							acceptable = true;
+						} else if public_key_string_truncated.ends_with(&thread_search_end) {
+							acceptable = true;
+						}
+
+						if acceptable {
+							if FOUND.load(std::sync::atomic::Ordering::Relaxed) {
+								break;
+							}
+
+							FOUND.store(true, std::sync::atomic::Ordering::Relaxed);
+
+							if passphrase.is_some() {
+								println!("Passphrase : {}", passphrase.unwrap());
+							}
+							println!("Seed       : {}", bytes_to_hex(&seed));
+							println!("Index      : {}", index);
+							println!("Secret Key : {}", key.display_secret());
+							println!("Public Key : {}", public_key_string);
+							break;
+						}
+					}
+
+					if FOUND.load(std::sync::atomic::Ordering::Relaxed) {
+						break;
+					}
+				}
+			});
+		}
+	});
+
+	return Ok(());
+}
