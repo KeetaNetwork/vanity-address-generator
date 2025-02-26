@@ -118,8 +118,6 @@ struct CLIOptions {
 }
 
 fn main() -> Result<(), i32> {
-	static FOUND: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
 	let opts = CLIOptions::parse_args_default_or_exit();
 	if opts.args.len() != 1 {
 		eprintln!("Invalid number of arguments -- must supply a search string");
@@ -136,10 +134,14 @@ fn main() -> Result<(), i32> {
 
 	println!("Searching for public key starting or ending with {} with {} threads", search_basic, thread_count);
 
+	let found = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+	let checks_performed = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
 	std::thread::scope(|s| {
 		for _ in 0..thread_count {
 			let thread_search_start = search_basic.clone();
 			let thread_search_end = search_basic.clone();
+			let thread_found = found.clone();
+			let thread_checks_performed = checks_performed.clone();
 			s.spawn(move || {
 				loop {
 					let passphrase = if use_passphrase {
@@ -155,7 +157,7 @@ fn main() -> Result<(), i32> {
 					};
 
 					for index in 0..max_index + 1 {
-						if FOUND.load(std::sync::atomic::Ordering::Relaxed) {
+						if thread_found.load(std::sync::atomic::Ordering::Relaxed) {
 							break;
 						}
 
@@ -176,12 +178,14 @@ fn main() -> Result<(), i32> {
 							}
 						};
 
+						thread_checks_performed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
 						if acceptable {
-							if FOUND.load(std::sync::atomic::Ordering::Relaxed) {
+							if thread_found.load(std::sync::atomic::Ordering::Relaxed) {
 								break;
 							}
 
-							FOUND.store(true, std::sync::atomic::Ordering::Relaxed);
+							thread_found.store(true, std::sync::atomic::Ordering::Relaxed);
 
 							if passphrase.is_some() {
 								println!("Passphrase : {}", passphrase.unwrap());
@@ -194,11 +198,36 @@ fn main() -> Result<(), i32> {
 						}
 					}
 
-					if FOUND.load(std::sync::atomic::Ordering::Relaxed) {
+					if thread_found.load(std::sync::atomic::Ordering::Relaxed) {
 						break;
 					}
 				}
 			});
+		}
+
+		let mut loop_counter = 0;
+		let mut start_time = std::time::Instant::now();
+		let spinner = indicatif::ProgressBar::new_spinner();
+		let mut discount_checks_performed = 0;
+		loop {
+			if found.load(std::sync::atomic::Ordering::Relaxed) {
+				break;
+			}
+
+			loop_counter += 1;
+			if loop_counter % 10 == 0 {
+				start_time = std::time::Instant::now();
+				discount_checks_performed = checks_performed.load(std::sync::atomic::Ordering::Relaxed);
+			}
+
+			std::thread::sleep(std::time::Duration::from_millis(500));
+			let checks_performed = checks_performed.load(std::sync::atomic::Ordering::Relaxed);
+			let current_time = std::time::Instant::now();
+			let delta_time = current_time.duration_since(start_time).as_millis() as f64;
+			let rate = ((checks_performed - discount_checks_performed) as f64) / delta_time * 1000.0;
+
+			spinner.set_message(format!("Checks performed: {} ({} checks/s)", checks_performed, rate.floor()));
+			spinner.tick();
 		}
 	});
 
