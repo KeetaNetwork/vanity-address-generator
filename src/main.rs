@@ -208,7 +208,7 @@ fn main() -> Result<(), i32> {
 
 		let max_estimated_checks = (2 as u64).pow(5 * search_basic.len() as u32) * 8;
 		let progress_bar = indicatif::ProgressBar::new(max_estimated_checks);
-		progress_bar.set_style(indicatif::ProgressStyle::with_template("[{elapsed_precise}/{eta_precise}] {wide_bar} {human_pos:>15}/{human_len:15} {per_sec:15}").unwrap());
+		progress_bar.set_style(indicatif::ProgressStyle::with_template("[{elapsed_precise}/{eta_precise}] {wide_bar}   {human_pos}/{human_len}  {per_sec:15}").unwrap());
 		loop {
 			if found.load(std::sync::atomic::Ordering::Relaxed) {
 				progress_bar.abandon();
