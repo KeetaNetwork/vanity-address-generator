@@ -216,7 +216,7 @@ fn main() -> Result<(), i32> {
 			}
 
 			loop_counter += 1;
-			if loop_counter % 10 == 0 {
+			if loop_counter % 100 == 0 {
 				start_time = std::time::Instant::now();
 				discount_checks_performed = checks_performed.load(std::sync::atomic::Ordering::Relaxed);
 			}
