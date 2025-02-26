@@ -206,29 +206,20 @@ fn main() -> Result<(), i32> {
 			});
 		}
 
-		let mut loop_counter = 0;
-		let mut start_time = std::time::Instant::now();
-		let spinner = indicatif::ProgressBar::new_spinner();
-		let mut discount_checks_performed = 0;
+		let max_estimated_checks = (2 as u64).pow(5 * search_basic.len() as u32) * 8;
+		let progress_bar = indicatif::ProgressBar::new(max_estimated_checks);
+		progress_bar.set_style(indicatif::ProgressStyle::with_template("[{elapsed_precise}/{eta_precise}] {wide_bar} {human_pos:>15}/{human_len:15} {per_sec:15}").unwrap());
 		loop {
 			if found.load(std::sync::atomic::Ordering::Relaxed) {
+				progress_bar.abandon();
 				break;
-			}
-
-			loop_counter += 1;
-			if loop_counter % 100 == 0 {
-				start_time = std::time::Instant::now();
-				discount_checks_performed = checks_performed.load(std::sync::atomic::Ordering::Relaxed);
 			}
 
 			std::thread::sleep(std::time::Duration::from_millis(500));
 			let checks_performed = checks_performed.load(std::sync::atomic::Ordering::Relaxed);
-			let current_time = std::time::Instant::now();
-			let delta_time = current_time.duration_since(start_time).as_millis() as f64;
-			let rate = ((checks_performed - discount_checks_performed) as f64) / delta_time * 1000.0;
 
-			spinner.set_message(format!("Checks performed: {} ({} checks/s)", checks_performed, rate.floor()));
-			spinner.tick();
+			progress_bar.set_position(checks_performed as u64);
+			progress_bar.tick();
 		}
 	});
 
