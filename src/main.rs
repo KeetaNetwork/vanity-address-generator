@@ -126,7 +126,8 @@ fn main() -> Result<(), i32> {
 	}
 
 	let max_index: u32 = opts.max_index.unwrap_or(u32::MAX - 1);
-	let thread_count: usize = opts.thread_count.unwrap_or(1);
+	let default_thread_count = (num_cpus::get() as f64 / 2.0 + 0.6).trunc() as usize;
+	let thread_count: usize = opts.thread_count.unwrap_or(default_thread_count);
 	let use_passphrase = opts.use_passphrase;
 
 	let search_basic = opts.args[0].clone();
