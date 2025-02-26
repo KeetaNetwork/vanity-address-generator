@@ -120,10 +120,6 @@ struct CLIOptions {
 fn main() -> Result<(), i32> {
 	static FOUND: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-	let mut thread_count: usize = 1;
-	let mut max_index: u32 = u32::MAX - 1;
-	let mut passphrase_search = false;
-
 	let opts = CLIOptions::parse_args_default_or_exit();
 	if opts.args.len() != 1 {
 		eprintln!("Invalid number of arguments -- must supply a search string");
@@ -131,17 +127,9 @@ fn main() -> Result<(), i32> {
 		return Err(1);
 	}
 
-	if opts.max_index.is_some() {
-		max_index = opts.max_index.unwrap();
-	}
-
-	if opts.thread_count.is_some() {
-		thread_count = opts.thread_count.unwrap();
-	}
-
-	if opts.use_passphrase {
-		passphrase_search = true;
-	}
+	let max_index: u32 = opts.max_index.unwrap_or(u32::MAX - 1);
+	let thread_count: usize = opts.thread_count.unwrap_or(1);
+	let use_passphrase = opts.use_passphrase;
 
 	let search_basic = opts.args[0].clone();
 	let search_start_offset: usize = 9;
@@ -154,7 +142,7 @@ fn main() -> Result<(), i32> {
 			let thread_search_end = search_basic.clone();
 			s.spawn(move || {
 				loop {
-					let passphrase = if passphrase_search {
+					let passphrase = if use_passphrase {
 						Some(generate_random_passphrase())
 					} else {
 						None
