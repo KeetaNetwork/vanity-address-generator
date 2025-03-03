@@ -117,6 +117,12 @@ struct CLIOptions {
 	use_passphrase: bool,
 }
 
+struct FoundResult {
+	passphrase: Option<String>,
+	seed: [u8; 32],
+	index: u32,
+}
+
 fn main() -> Result<(), &'static str> {
 	let opts = CLIOptions::parse_args_default_or_exit();
 	if opts.args.len() != 1 {
@@ -140,12 +146,14 @@ fn main() -> Result<(), &'static str> {
 	println!("Searching for public key starting or ending with {} with {} threads", search_basic, thread_count);
 
 	let found = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+	let found_result = std::sync::Arc::new(std::sync::Mutex::new(Option::<FoundResult>::None));
 	let checks_performed = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
 	std::thread::scope(|s| {
 		for _ in 0..thread_count {
 			let thread_search_start = search_basic.clone();
 			let thread_search_end = search_basic.clone();
 			let thread_found = found.clone();
+			let thread_found_result = found_result.clone();
 			let thread_checks_performed = checks_performed.clone();
 			s.spawn(move || {
 				loop {
@@ -190,15 +198,14 @@ fn main() -> Result<(), &'static str> {
 								break;
 							}
 
+							thread_found_result.lock().unwrap().replace(FoundResult {
+								passphrase: passphrase.clone(),
+								seed,
+								index,
+							});
+
 							thread_found.store(true, std::sync::atomic::Ordering::Relaxed);
 
-							if passphrase.is_some() {
-								println!("Passphrase : {}", passphrase.unwrap());
-							}
-							println!("Seed       : {}", bytes_to_hex(&seed));
-							println!("Index      : {}", index);
-							println!("Secret Key : {}", key.display_secret());
-							println!("Public Key : {}", public_key_string);
 							break;
 						}
 					}
@@ -216,6 +223,23 @@ fn main() -> Result<(), &'static str> {
 		loop {
 			if found.load(std::sync::atomic::Ordering::Relaxed) {
 				progress_bar.abandon();
+
+				/* Ensure the result is available */
+				while found_result.lock().unwrap().is_none() {
+					std::thread::sleep(std::time::Duration::from_millis(100));
+				}
+
+				let result = found_result.lock().unwrap().take().unwrap();
+				let key = seed_to_private_key(&result.seed, result.index).unwrap();
+				let public_key_string = derive_public_key_string(&key).unwrap();
+
+				if result.passphrase.is_some() {
+					println!("Passphrase : {}", result.passphrase.unwrap());
+				}
+				println!("Seed       : {}", bytes_to_hex(&result.seed));
+				println!("Index      : {}", result.index);
+				println!("Secret Key : {}", key.display_secret());
+				println!("Public Key : {}", public_key_string);
 				break;
 			}
 
