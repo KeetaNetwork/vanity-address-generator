@@ -133,6 +133,12 @@ fn main() -> Result<(), i32> {
 	let search_basic = opts.args[0].clone();
 	let search_start_offset: usize = 9;
 
+	let check = base32::decode(base32::Alphabet::Rfc4648Lower { padding: false }, search_basic.as_str());
+	if check.is_none() {
+		eprintln!("Invalid search string -- must be a valid RFC4648 base32 string");
+		return Err(1);
+	}
+
 	println!("Searching for public key starting or ending with {} with {} threads", search_basic, thread_count);
 
 	let found = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
