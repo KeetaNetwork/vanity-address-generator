@@ -1,9 +1,12 @@
+use gumdrop::Options as _;
 use rand_core::RngCore as _;
 use sha3::Digest as _;
-use gumdrop::Options as _;
 
 fn bytes_to_hex(bytes: &[u8]) -> String {
-	let hex_str = bytes.iter().map(|b| format!("{:02x}", b)).collect::<String>();
+	let hex_str = bytes
+		.iter()
+		.map(|b| format!("{:02x}", b))
+		.collect::<String>();
 	return hex_str;
 }
 
@@ -12,11 +15,20 @@ fn seed_from_passphrase(passphrase: &str) -> Result<[u8; 32], String> {
 	let clean_passphrase = passphrase.to_lowercase().replace(" ", "");
 	let clean_passphrase_buffer = clean_passphrase.as_bytes();
 	if clean_passphrase_buffer.len() < min_passphrase_length {
-		return Err(format!("Invalid passphrase, must be at least {} bytes after internal processing, got {}", min_passphrase_length, clean_passphrase_buffer.len()));
+		return Err(format!(
+			"Invalid passphrase, must be at least {} bytes after internal processing, got {}",
+			min_passphrase_length,
+			clean_passphrase_buffer.len()
+		));
 	}
 
 	let mut key = [0u8; 32];
-	pbkdf2::pbkdf2_hmac::<sha2::Sha256>(clean_passphrase_buffer, clean_passphrase_buffer, 64000, &mut key);
+	pbkdf2::pbkdf2_hmac::<sha2::Sha256>(
+		clean_passphrase_buffer,
+		clean_passphrase_buffer,
+		64000,
+		&mut key,
+	);
 
 	return Ok(key);
 }
@@ -52,7 +64,7 @@ fn seed_to_private_key(seed: &[u8], index: u32) -> Result<secp256k1::SecretKey, 
 
 fn derive_public_key_string(key: &secp256k1::SecretKey) -> Result<String, String> {
 	let secp = secp256k1::Secp256k1::signing_only();
-        let public_key = key.public_key(&secp);
+	let public_key = key.public_key(&secp);
 	let serialized = public_key.serialize();
 	let mut pub_key_values = vec![0u8; 1];
 	pub_key_values.extend_from_slice(&serialized);
@@ -66,10 +78,16 @@ fn derive_public_key_string(key: &secp256k1::SecretKey) -> Result<String, String
 	pub_key_values.extend_from_slice(&checksum[..5]);
 
 	if pub_key_values.len() != 38 && pub_key_values.len() != 39 {
-		return Err(format!("internal error: Got incorrect length for public key: {} !== 38 or 39", pub_key_values.len()));
+		return Err(format!(
+			"internal error: Got incorrect length for public key: {} !== 38 or 39",
+			pub_key_values.len()
+		));
 	}
 
-	let pub_key_formatted = base32::encode(base32::Alphabet::Rfc4648Lower { padding: false }, &pub_key_values);
+	let pub_key_formatted = base32::encode(
+		base32::Alphabet::Rfc4648Lower { padding: false },
+		&pub_key_values,
+	);
 
 	return Ok(format!("keeta_{}", pub_key_formatted));
 }
@@ -138,12 +156,18 @@ fn main() -> Result<(), &'static str> {
 	let search_basic = opts.args[0].clone();
 	let search_start_offset: usize = 9;
 
-	let check = base32::decode(base32::Alphabet::Rfc4648Lower { padding: false }, search_basic.as_str());
+	let check = base32::decode(
+		base32::Alphabet::Rfc4648Lower { padding: false },
+		search_basic.as_str(),
+	);
 	if check.is_none() {
 		return Err("Invalid search string -- must be a valid RFC4648 base32 string");
 	}
 
-	println!("Searching for public key starting or ending with {} with {} threads", search_basic, thread_count);
+	println!(
+		"Searching for public key starting or ending with {} with {} threads",
+		search_basic, thread_count
+	);
 
 	let found = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 	let found_result = std::sync::Arc::new(std::sync::Mutex::new(Option::<FoundResult>::None));
