@@ -117,12 +117,11 @@ struct CLIOptions {
 	use_passphrase: bool,
 }
 
-fn main() -> Result<(), i32> {
+fn main() -> Result<(), &'static str> {
 	let opts = CLIOptions::parse_args_default_or_exit();
 	if opts.args.len() != 1 {
-		eprintln!("Invalid number of arguments -- must supply a search string");
 		eprintln!("{}", CLIOptions::usage());
-		return Err(1);
+		return Err("Invalid number of arguments -- must supply a search string");
 	}
 
 	let max_index: u32 = opts.max_index.unwrap_or(u32::MAX - 1);
@@ -135,8 +134,7 @@ fn main() -> Result<(), i32> {
 
 	let check = base32::decode(base32::Alphabet::Rfc4648Lower { padding: false }, search_basic.as_str());
 	if check.is_none() {
-		eprintln!("Invalid search string -- must be a valid RFC4648 base32 string");
-		return Err(1);
+		return Err("Invalid search string -- must be a valid RFC4648 base32 string");
 	}
 
 	println!("Searching for public key starting or ending with {} with {} threads", search_basic, thread_count);
