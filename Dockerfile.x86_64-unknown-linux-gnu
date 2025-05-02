@@ -1,0 +1,38 @@
+FROM debian:bookworm
+
+# Set DEBIAN_FRONTEND to noninteractive to avoid prompts from apt
+ARG DEBIAN_FRONTEND=noninteractive
+
+# Specify the target platform
+ARG TARGET=x86_64-unknown-linux-gnu
+
+# Workaround for Cloudflare blocking HTTP downloads of package data
+RUN echo "Acquire { https::Verify-Peer false }" >/etc/apt/apt.conf.d/99verify-peer.conf && \
+	sed -i 's/http:/https:/g' /etc/apt/sources.list.d/*.sources && \
+	apt update && \
+	apt install -y ca-certificates && \
+	rm -f /etc/apt/apt.conf.d/99verify-peer.conf && \
+	apt clean && \
+	rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# Patch the system
+RUN apt update && \
+	apt upgrade -y
+
+# Install dependencies
+RUN apt install -y curl make build-essential
+
+# Install Rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \
+	. $HOME/.cargo/env && \
+	rustup default stable && \
+	rustup target add $TARGET
+
+# Compile the project
+COPY . /data
+WORKDIR /data
+
+RUN rm -f Dockerfile*
+
+RUN . $HOME/.cargo/env && \
+	make vanity-address-generator-$TARGET
