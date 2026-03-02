@@ -277,3 +277,123 @@ fn main() -> Result<(), &'static str> {
 
 	return Ok(());
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_bytes_to_hex() {
+		let bytes = vec![0x00, 0x0a, 0xff, 0x10];
+		assert_eq!(bytes_to_hex(&bytes), "000aff10");
+	}
+
+	#[test]
+	fn test_bytes_to_hex_empty() {
+		let bytes = vec![];
+		assert_eq!(bytes_to_hex(&bytes), "");
+	}
+
+	#[test]
+	fn test_seed_from_passphrase_valid() {
+		let passphrase = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+		let result = seed_from_passphrase(passphrase);
+		assert!(result.is_ok());
+		let seed = result.unwrap();
+		assert_eq!(seed.len(), 32);
+	}
+
+	#[test]
+	fn test_seed_from_passphrase_too_short() {
+		let passphrase = "short";
+		let result = seed_from_passphrase(passphrase);
+		assert!(result.is_err());
+		assert!(result.unwrap_err().contains("must be at least"));
+	}
+
+	#[test]
+	fn test_seed_from_passphrase_deterministic() {
+		let passphrase = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+		let seed1 = seed_from_passphrase(passphrase).unwrap();
+		let seed2 = seed_from_passphrase(passphrase).unwrap();
+		assert_eq!(seed1, seed2);
+	}
+
+	#[test]
+	fn test_combine_seed_and_index() {
+		let seed = [0u8; 32];
+		let index = 0x12345678u32;
+		let result = combine_seed_and_index(&seed, index);
+		assert_eq!(result.len(), 36);
+		assert_eq!(result[32], 0x12);
+		assert_eq!(result[33], 0x34);
+		assert_eq!(result[34], 0x56);
+		assert_eq!(result[35], 0x78);
+	}
+
+	#[test]
+	fn test_seed_to_private_key() {
+		let seed = [1u8; 32];
+		let result = seed_to_private_key(&seed, 0);
+		assert!(result.is_ok());
+	}
+
+	#[test]
+	fn test_derive_public_key_string() {
+		let seed = [1u8; 32];
+		let key = seed_to_private_key(&seed, 0).unwrap();
+		let result = derive_public_key_string(&key);
+		assert!(result.is_ok());
+		let pub_key = result.unwrap();
+		assert!(pub_key.starts_with("keeta_"));
+	}
+
+	#[test]
+	fn test_generate_random_passphrase() {
+		let passphrase = generate_random_passphrase();
+		let words: Vec<&str> = passphrase.split(' ').collect();
+		assert_eq!(words.len(), 24);
+		// Verify all words are from the BIP39 dictionary
+		for word in words {
+			assert!(bip39_dict::ENGLISH.words.contains(&word));
+		}
+	}
+
+	#[test]
+	fn test_generate_random_seed() {
+		let seed1 = generate_random_seed();
+		let seed2 = generate_random_seed();
+		assert_eq!(seed1.len(), 32);
+		assert_eq!(seed2.len(), 32);
+		// Seeds should be different (with very high probability)
+		assert_ne!(seed1, seed2);
+	}
+
+	#[test]
+	fn test_public_key_format() {
+		// Test that public keys have the correct format
+		let seed = [42u8; 32];
+		let key = seed_to_private_key(&seed, 0).unwrap();
+		let pub_key = derive_public_key_string(&key).unwrap();
+		
+		// Should start with "keeta_"
+		assert!(pub_key.starts_with("keeta_"));
+		
+		// Should only contain valid base32 characters (lowercase)
+		let base32_part = &pub_key[6..];
+		for c in base32_part.chars() {
+			assert!(c.is_ascii_lowercase() || c.is_ascii_digit());
+		}
+	}
+
+	#[test]
+	fn test_different_indices_produce_different_keys() {
+		let seed = [5u8; 32];
+		let key1 = seed_to_private_key(&seed, 0).unwrap();
+		let key2 = seed_to_private_key(&seed, 1).unwrap();
+		let pub1 = derive_public_key_string(&key1).unwrap();
+		let pub2 = derive_public_key_string(&key2).unwrap();
+		
+		assert_ne!(pub1, pub2);
+	}
+}
